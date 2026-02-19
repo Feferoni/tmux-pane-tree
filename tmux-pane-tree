@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""
-CLI for tmux-pane-tree
-"""
+
 import sys
 import argparse
-from tmux_pane_tree import TmuxTree, find_neovim_in_neighbors
+from tmux_pane_tree import TmuxTree
 from rpc import find_nvim_socket, nvim_exec
 
 
-def cmd_tree(tree, args):
+def cmd_tree(tree: TmuxTree, _: argparse.Namespace) -> None:
     tree.print_tree()
 
 
-def cmd_current(tree, args):
+def cmd_current(tree: TmuxTree, _: argparse.Namespace) -> None:
     current = tree.get_current_pane()
     if current:
         print(f"ID: {current.id}")
@@ -24,7 +22,7 @@ def cmd_current(tree, args):
         sys.exit(1)
 
 
-def cmd_neighbors(tree, args):
+def cmd_neighbors(tree: TmuxTree, _: argparse.Namespace) -> None:
     current = tree.get_current_pane()
     if not current:
         print("No active pane found", file=sys.stderr)
@@ -37,7 +35,7 @@ def cmd_neighbors(tree, args):
             print(f"{direction}: {pane_id} - {pane.get_process()}")
 
 
-def cmd_find_process(tree, args):
+def cmd_find_process(tree: TmuxTree, args: argparse.Namespace) -> None:
     current = tree.get_current_pane()
     if not current:
         print("No active pane found", file=sys.stderr)
@@ -54,7 +52,7 @@ def cmd_find_process(tree, args):
     sys.exit(1)
 
 
-def cmd_send_keys(tree, args):
+def cmd_send_keys(tree: TmuxTree, args: argparse.Namespace) -> None:
     pane = tree.find_pane(args.pane_id)
     if pane:
         pane.send_keys(args.keys)
@@ -63,14 +61,14 @@ def cmd_send_keys(tree, args):
         sys.exit(1)
 
 
-def cmd_nvim_exec(tree, args):
+def cmd_nvim_exec(tree: TmuxTree, args: argparse.Namespace) -> None:
     # If no pane_id provided, find nvim in neighbors
     if not args.pane_id:
         current = tree.get_current_pane()
         if not current:
             print("No active pane found", file=sys.stderr)
             sys.exit(1)
-        
+
         neighbors = current.get_neighbors()
         # Prioritize left, then check others
         for direction in ['left', 'right', 'up', 'down']:
@@ -100,7 +98,7 @@ def cmd_nvim_exec(tree, args):
         pane.switch_to()
 
 
-def cmd_direction(tree, args):
+def cmd_direction(tree: TmuxTree, args: argparse.Namespace) -> None:
     pane1 = tree.find_pane(args.from_pane)
     pane2 = tree.find_pane(args.to_pane)
     if pane1 and pane2:
@@ -111,7 +109,7 @@ def cmd_direction(tree, args):
         sys.exit(1)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Tmux pane tree manager')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
@@ -133,7 +131,10 @@ def main():
     nvim_parser = subparsers.add_parser('nvim_exec',
                                         help='Execute command in neovim without history')
     nvim_parser.add_argument('nvim_command', help='Neovim command to execute')
-    nvim_parser.add_argument('-p', '--pane', dest='pane_id', help='Target pane ID (optional, auto-detects nvim in neighbors)')
+    nvim_parser.add_argument('-p',
+                             '--pane',
+                             dest='pane_id',
+                             help='Target pane ID (optional, auto-detects nvim in neighbors)')
     nvim_parser.add_argument('-s',
                              '--switch',
                              action='store_true',

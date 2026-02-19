@@ -1,9 +1,10 @@
 import os
 import glob
 import subprocess
+from typing import Optional
 
 
-def find_nvim_socket(pane_pid):
+def find_nvim_socket(pane_pid: int) -> Optional[str]:
     """Find nvim socket for a given pane PID."""
     # Find nvim listening sockets
     xdg_runtime = os.environ.get('XDG_RUNTIME_DIR')
@@ -37,7 +38,7 @@ def find_nvim_socket(pane_pid):
     return None
 
 
-def nvim_exec(socket, cmd):
+def nvim_exec(socket: str, cmd: str) -> bool:
     """Execute command in neovim via socket."""
     try:
         result = subprocess.run(

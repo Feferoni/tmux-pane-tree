@@ -1,15 +1,16 @@
 import subprocess
 import json
+from typing import Optional
 
 
-def run_tmux(cmd):
+def run_tmux(cmd: str) -> str:
     """Execute tmux command and return output."""
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, executable='/bin/bash')
     return result.stdout.strip()
 
 
 class Pane:
-    def __init__(self, pane_id, window, index, active, width, height, x, y, pid):
+    def __init__(self, pane_id: str, window: 'Window', index: str, active: bool, width: str, height: str, x: str, y: str, pid: str):
         self.id = pane_id
         self.window = window
         self.index = index
@@ -20,25 +21,25 @@ class Pane:
         self.y = int(y)
         self.pid = int(pid)
     
-    def get_process(self):
+    def get_process(self) -> str:
         """Get the process running in this pane."""
         cmd = f"tmux display-message -p -t '{self.id}' '#{{pane_current_command}}'"
         return run_tmux(cmd)
     
-    def has_subprocess(self, process_name):
+    def has_subprocess(self, process_name: str) -> bool:
         """Check if a specific subprocess is running in this pane."""
         return process_name.lower() in self.get_process().lower()
     
-    def send_keys(self, keys):
+    def send_keys(self, keys: str) -> None:
         """Send keys to this pane. Separate literal text and special keys with spaces."""
         # Build the tmux command - keys should already be properly formatted by caller
         run_tmux(f"tmux send-keys -t '{self.id}' {keys}")
     
-    def switch_to(self):
+    def switch_to(self) -> None:
         """Switch to this pane."""
         run_tmux(f"tmux select-pane -t '{self.id}'")
     
-    def get_neighbors(self):
+    def get_neighbors(self) -> dict[str, str]:
         """Get neighboring panes (left, right, up, down)."""
         neighbors = {}
         # Get all panes in the same window
@@ -63,7 +64,7 @@ class Pane:
                 neighbors['down'] = pane.id
         return neighbors
     
-    def get_direction_to(self, other_pane):
+    def get_direction_to(self, other_pane: 'Pane') -> Optional[str]:
         """Determine direction of other_pane relative to this pane."""
         if other_pane.x < self.x:
             return 'left'
@@ -77,15 +78,15 @@ class Pane:
 
 
 class Window:
-    def __init__(self, window_id, session, index, name, active):
+    def __init__(self, window_id: str, session: 'Session', index: str, name: str, active: bool):
         self.id = window_id
         self.session = session
         self.index = index
         self.name = name
         self.active = active
-        self.panes = []
+        self.panes: list[Pane] = []
     
-    def load_panes(self):
+    def load_panes(self) -> None:
         """Load all panes in this window."""
         cmd = f"tmux list-panes -t '{self.id}' -F '#{{pane_id}}|#{{pane_index}}|#{{pane_active}}|#{{pane_width}}|#{{pane_height}}|#{{pane_left}}|#{{pane_top}}|#{{pane_pid}}'"
         output = run_tmux(cmd)
@@ -97,13 +98,13 @@ class Window:
 
 
 class Session:
-    def __init__(self, session_id, name, attached):
+    def __init__(self, session_id: str, name: str, attached: bool):
         self.id = session_id
         self.name = name
         self.attached = attached
-        self.windows = []
+        self.windows: list[Window] = []
     
-    def load_windows(self):
+    def load_windows(self) -> None:
         """Load all windows in this session."""
         cmd = f"tmux list-windows -t '{self.id}' -F '#{{window_id}}|#{{window_index}}|#{{window_name}}|#{{window_active}}'"
         output = run_tmux(cmd)
@@ -117,10 +118,10 @@ class Session:
 
 class TmuxTree:
     def __init__(self):
-        self.sessions = []
+        self.sessions: list[Session] = []
         self.load()
     
-    def load(self):
+    def load(self) -> None:
         """Load all tmux sessions, windows, and panes."""
         cmd = "tmux list-sessions -F '#{session_id}|#{session_name}|#{session_attached}'"
         output = run_tmux(cmd)
@@ -131,7 +132,7 @@ class TmuxTree:
                 session.load_windows()
                 self.sessions.append(session)
     
-    def get_current_pane(self):
+    def get_current_pane(self) -> Optional[Pane]:
         """Get the currently active pane."""
         for session in self.sessions:
             for window in session.windows:
@@ -140,7 +141,7 @@ class TmuxTree:
                         return pane
         return None
     
-    def find_pane(self, pane_id):
+    def find_pane(self, pane_id: str) -> Optional[Pane]:
         """Find a pane by its ID."""
         for session in self.sessions:
             for window in session.windows:
@@ -149,7 +150,7 @@ class TmuxTree:
                         return pane
         return None
     
-    def print_tree(self):
+    def print_tree(self) -> None:
         """Print tree representation of sessions -> windows -> panes."""
         for session in self.sessions:
             marker = "●" if session.attached else "○"
@@ -163,7 +164,7 @@ class TmuxTree:
                     print(f"    {marker} Pane {pane.index} ({pane.id}) - {process} [{pane.width}x{pane.height} @ {pane.x},{pane.y}]")
 
 
-def find_neovim_in_neighbors(current_pane):
+def find_neovim_in_neighbors(current_pane: Pane) -> tuple[Optional[Pane], Optional[str]]:
     """Example: Find neovim in neighbor panes and return the pane."""
     tree = TmuxTree()
     neighbors = current_pane.get_neighbors()
