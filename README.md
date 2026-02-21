@@ -41,24 +41,9 @@ direction = current.get_direction_to(other_pane)
 other_pane.send_keys('echo hello')
 ```
 
-## Example: Find neovim in neighbors
-
-```python
-from tmux_tree import TmuxTree, find_neovim_in_neighbors
-
-tree = TmuxTree()
-current = tree.get_current_pane()
-
-nvim_pane, direction = find_neovim_in_neighbors(current)
-if nvim_pane:
-    print(f"Found neovim {direction}")
-    nvim_pane.send_keys("Escape")
-    nvim_pane.send_keys(":echo 'Hello!' Enter")
-```
-
 ## CLI Usage
-
 ```bash
+
 # Show tree
 ./tmux-pane-tree tree
 
