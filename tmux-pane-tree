@@ -70,13 +70,16 @@ def cmd_nvim_exec(tree: TmuxTree, args: argparse.Namespace) -> None:
             sys.exit(1)
 
         neighbors = current.get_neighbors()
-        # Prioritize left, then check others
-        for direction in ['left', 'right', 'up', 'down']:
-            if direction in neighbors:
-                pane = tree.find_pane(neighbors[direction])
-                if pane and pane.has_subprocess('nvim'):
-                    break
-        else:
+        # Positional first, then remaining IDs
+        pane_ids = [neighbors[d] for d in ['left', 'right', 'up', 'down'] if d in neighbors]
+        pane_ids += [v for k, v in neighbors.items() if k not in ('left', 'right', 'up', 'down')]
+        pane = None
+        for pane_id in pane_ids:
+            p = tree.find_pane(pane_id)
+            if p and p.has_subprocess('nvim'):
+                pane = p
+                break
+        if not pane:
             print("No neovim found in neighbor panes", file=sys.stderr)
             sys.exit(1)
     else:
@@ -98,17 +101,6 @@ def cmd_nvim_exec(tree: TmuxTree, args: argparse.Namespace) -> None:
         pane.switch_to()
 
 
-def cmd_direction(tree: TmuxTree, args: argparse.Namespace) -> None:
-    pane1 = tree.find_pane(args.from_pane)
-    pane2 = tree.find_pane(args.to_pane)
-    if pane1 and pane2:
-        direction = pane1.get_direction_to(pane2)
-        print(direction if direction else "same")
-    else:
-        print("Pane not found", file=sys.stderr)
-        sys.exit(1)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description='Tmux pane tree manager')
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -123,10 +115,6 @@ def main() -> None:
     send_parser = subparsers.add_parser('send', help='Send keys to pane')
     send_parser.add_argument('pane_id', help='Target pane ID')
     send_parser.add_argument('keys', help='Keys to send')
-
-    dir_parser = subparsers.add_parser('direction', help='Get direction between panes')
-    dir_parser.add_argument('from_pane', help='Source pane ID')
-    dir_parser.add_argument('to_pane', help='Target pane ID')
 
     nvim_parser = subparsers.add_parser('nvim_exec',
                                         help='Execute command in neovim without history')
@@ -148,7 +136,6 @@ def main() -> None:
         'neighbors': cmd_neighbors,
         'find': cmd_find_process,
         'send': cmd_send_keys,
-        'direction': cmd_direction,
         'nvim_exec': cmd_nvim_exec,
     }
 

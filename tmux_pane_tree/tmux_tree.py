@@ -1,6 +1,6 @@
 import subprocess
 import json
-from typing import Optional
+from typing import Optional, Dict
 
 
 def run_tmux(cmd: str) -> str:
@@ -41,40 +41,39 @@ class Pane:
         """Switch to this pane."""
         run_tmux(f"tmux select-pane -t '{self.id}'")
 
-    def get_neighbors(self) -> dict[str, str]:
-        """Get neighboring panes (left, right, up, down)."""
+    def is_zoomed(self) -> bool:
+        """Check if this pane's window is currently zoomed."""
+        return run_tmux(
+            f"tmux display-message -p -t '{self.window.id}' '#{{window_zoomed_flag}}'") == '1'
+
+    def get_neighbors(self) -> Dict[str, str]:
+        """Get neighboring panes (left, right, up, down). Falls back to pane IDs as keys."""
         neighbors = {}
-        # Get all panes in the same window
         for pane in self.window.panes:
             if pane.id == self.id:
                 continue
-            # Check if pane is to the left (adjacent horizontally, overlapping vertically)
-            if (abs((pane.x + pane.width) - self.x) <= 2
-                    and not (pane.y + pane.height <= self.y or pane.y >= self.y + self.height)):
-                neighbors['left'] = pane.id
-            # Check if pane is to the right (adjacent horizontally, overlapping vertically)
-            elif (abs((self.x + self.width) - pane.x) <= 2
-                  and not (pane.y + pane.height <= self.y or pane.y >= self.y + self.height)):
-                neighbors['right'] = pane.id
-            # Check if pane is above (adjacent vertically, overlapping horizontally)
-            elif (abs((pane.y + pane.height) - self.y) <= 2
-                  and not (pane.x + pane.width <= self.x or pane.x >= self.x + self.width)):
-                neighbors['up'] = pane.id
-            # Check if pane is below (adjacent vertically, overlapping horizontally)
-            elif (abs((self.y + self.height) - pane.y) <= 2
-                  and not (pane.x + pane.width <= self.x or pane.x >= self.x + self.width)):
-                neighbors['down'] = pane.id
+
+            direction = self.get_direction_to(pane)
+            if direction:
+                neighbors[direction] = pane.id
+            else:
+                neighbors[pane.id] = pane.id
+
         return neighbors
 
-    def get_direction_to(self, other_pane: 'Pane') -> Optional[str]:
-        """Determine direction of other_pane relative to this pane."""
-        if other_pane.x < self.x:
+    def get_direction_to(self, pane: 'Pane') -> Optional[str]:
+        """Determine adjacency direction of pane relative to self using geometry."""
+        if (abs((pane.x + pane.width) - self.x) <= 2
+                and not (pane.y + pane.height <= self.y or pane.y >= self.y + self.height)):
             return 'left'
-        elif other_pane.x > self.x:
+        if (abs((self.x + self.width) - pane.x) <= 2
+                and not (pane.y + pane.height <= self.y or pane.y >= self.y + self.height)):
             return 'right'
-        elif other_pane.y < self.y:
+        if (abs((pane.y + pane.height) - self.y) <= 2
+                and not (pane.x + pane.width <= self.x or pane.x >= self.x + self.width)):
             return 'up'
-        elif other_pane.y > self.y:
+        if (abs((self.y + self.height) - pane.y) <= 2
+                and not (pane.x + pane.width <= self.x or pane.x >= self.x + self.width)):
             return 'down'
         return None
 
