@@ -132,3 +132,20 @@ creation. `shell` is a single pane starting in the project directory.
 
 Sessions are created detached unless an `active` window moves you there. Attach
 with `tmux attach -t <session>`.
+
+## Testing
+
+Tests use `pytest` and run without a real tmux server — `run_tmux` is patched by
+a fixture that records the tmux commands the library builds and returns scripted
+output. They cover command-execution safety (no shell injection), tmux error
+handling, output parsing, pane geometry, the neovim expr escaping, and the
+layout builder.
+
+Requires `pytest` (>= 7.0, for the `pythonpath` ini option).
+
+```bash
+python3 -m pytest -q
+```
+
+`pytest.ini` sets `pythonpath = .` so the `tmux_pane_tree` and `rpc` packages
+import when running from the repository root.
