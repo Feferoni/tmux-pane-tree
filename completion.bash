@@ -7,7 +7,7 @@ _tmux_pane_tree() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     
-    commands="tree current neighbors find send direction nvim_exec"
+    commands="tree current neighbors find send direction nvim_exec layout"
     
     # Complete main commands
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -44,6 +44,14 @@ _tmux_pane_tree() {
                     fi
                     ;;
             esac
+            ;;
+        layout)
+            # Complete flags, or JSON layout files for the positional argument
+            if [[ ${cur} == -* ]]; then
+                COMPREPLY=( $(compgen -W "-r --replace -p --print" -- ${cur}) )
+            else
+                COMPREPLY=( $(compgen -f -X '!*.json' -- ${cur}) )
+            fi
             ;;
     esac
 }

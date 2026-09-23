@@ -59,6 +59,18 @@ class Pane:
         """
         run_tmux(["send-keys", "-t", self.id, *shlex.split(keys)])
 
+    def run_command(self, command: str) -> None:
+        """Type a shell command into this pane and press Enter.
+
+        The command is sent literally (``send-keys -l``) so shell operators,
+        spaces and quotes are preserved exactly, then Enter is sent separately
+        to submit it. No shell is invoked by this library; the command runs in
+        whatever shell the pane already hosts.
+        """
+        if command:
+            run_tmux(["send-keys", "-t", self.id, "-l", command])
+        run_tmux(["send-keys", "-t", self.id, "Enter"])
+
     def switch_to(self) -> None:
         """Switch to this pane."""
         run_tmux(["select-pane", "-t", self.id])
