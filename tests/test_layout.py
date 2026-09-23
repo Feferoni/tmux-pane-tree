@@ -83,6 +83,22 @@ def test_format_layout_shows_structure_and_active():
     assert "$ tail -f log" in out  # bare-string pane shorthand
 
 
+def test_format_layout_filters_by_targets():
+    spec = {
+        "alpha": {"w": {"left": ["a"]}},
+        "beta": {"w": {"left": ["b"]}},
+    }
+    out = format_layout(spec, targets=["beta"])
+    assert "Session: beta" in out
+    assert "Session: alpha" not in out
+
+
+def test_format_layout_unknown_target_raises():
+    spec = {"alpha": {"w": {"left": ["a"]}}}
+    with pytest.raises(ValueError, match="unknown session"):
+        format_layout(spec, targets=["nope"])
+
+
 # --- file loading ----------------------------------------------------------
 
 def test_load_layout_file_roundtrip(tmp_path):
@@ -189,4 +205,51 @@ def test_active_selects_window(fake_tmux):
 def test_no_active_no_select(fake_tmux):
     _script_builder(fake_tmux)
     create_from_layout({"s": {"w": {"left": ["a"]}}})
+    assert fake_tmux.with_verb("select-window") == []
+
+
+# --- targets: create a subset of sessions ---------------------------------
+
+_MULTI = {
+    "alpha": {"w": {"left": ["a"]}},
+    "beta": {"w": {"left": ["b"]}},
+    "gamma": {"w": {"left": ["c"]}},
+}
+
+
+def test_targets_creates_only_selected(fake_tmux):
+    _script_builder(fake_tmux)
+    create_from_layout(_MULTI, targets=["beta"])
+    created = [c[c.index("-s") + 1] for c in fake_tmux.with_verb("new-session")]
+    assert created == ["beta"]
+
+
+def test_targets_respects_given_order(fake_tmux):
+    _script_builder(fake_tmux)
+    create_from_layout(_MULTI, targets=["gamma", "alpha"])
+    created = [c[c.index("-s") + 1] for c in fake_tmux.with_verb("new-session")]
+    assert created == ["gamma", "alpha"]
+
+
+def test_targets_none_creates_all(fake_tmux):
+    _script_builder(fake_tmux)
+    create_from_layout(_MULTI)
+    created = [c[c.index("-s") + 1] for c in fake_tmux.with_verb("new-session")]
+    assert created == ["alpha", "beta", "gamma"]
+
+
+def test_unknown_target_raises(fake_tmux):
+    _script_builder(fake_tmux)
+    with pytest.raises(ValueError, match="unknown session"):
+        create_from_layout(_MULTI, targets=["delta"])
+
+
+def test_active_only_moves_when_target_included(fake_tmux):
+    _script_builder(fake_tmux)
+    spec = {
+        "alpha": {"w": {"active": True, "left": ["a"]}},
+        "beta": {"w": {"left": ["b"]}},
+    }
+    # active window is in 'alpha'; creating only 'beta' must not move the client
+    create_from_layout(spec, targets=["beta"])
     assert fake_tmux.with_verb("select-window") == []

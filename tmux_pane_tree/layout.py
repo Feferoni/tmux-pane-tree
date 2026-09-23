@@ -147,11 +147,27 @@ def load_layout_file(path: str) -> LayoutSpec:
     return spec
 
 
-def format_layout(spec: LayoutSpec) -> str:
-    """Render a layout spec as an indented tree, without touching tmux."""
+def _select_sessions(parsed: dict, targets: Optional[List[str]]) -> List[str]:
+    """Return the session names to act on, validating any explicit targets."""
+    if targets is None:
+        return list(parsed.keys())
+    unknown = [name for name in targets if name not in parsed]
+    if unknown:
+        available = ", ".join(parsed) or "(none)"
+        raise ValueError(
+            f"unknown session(s): {', '.join(unknown)}; available: {available}")
+    return list(targets)
+
+
+def format_layout(spec: LayoutSpec, targets: Optional[List[str]] = None) -> str:
+    """Render a layout spec as an indented tree, without touching tmux.
+
+    If ``targets`` is given, only those sessions are rendered (in that order).
+    """
     parsed = _parse_windows(spec)
     lines: List[str] = []
-    for session_name, windows in parsed.items():
+    for session_name in _select_sessions(parsed, targets):
+        windows = parsed[session_name]
         lines.append(f"Session: {session_name}")
         for w_idx, (window_name, window) in enumerate(windows.items()):
             active = " *active*" if window["active"] else ""
@@ -169,9 +185,9 @@ def format_layout(spec: LayoutSpec) -> str:
     return "\n".join(lines)
 
 
-def print_layout(spec: LayoutSpec) -> None:
-    """Print the rendered layout tree to stdout."""
-    print(format_layout(spec))
+def print_layout(spec: LayoutSpec, targets: Optional[List[str]] = None) -> None:
+    """Print the rendered layout tree to stdout (optionally filtered by targets)."""
+    print(format_layout(spec, targets=targets))
 
 
 def _run_cmds(pane_id: str, cmds: List[str]) -> None:
@@ -272,18 +288,30 @@ def _goto_window(window_id: str) -> None:
         run_tmux(["switch-client", "-t", window_id])
 
 
-def create_from_layout(spec: LayoutSpec, replace: bool = False) -> List[str]:
-    """Create every session declared in ``spec``.
+def create_from_layout(spec: LayoutSpec, replace: bool = False,
+                       targets: Optional[List[str]] = None) -> List[str]:
+    """Create sessions declared in ``spec``.
 
-    If exactly one window is marked ``active``, the current tmux client is moved
-    to it after all sessions are built. Returns the created session ids in
-    declaration order.
+    Args:
+        spec: the parsed/raw layout mapping.
+        replace: kill and recreate a session if it already exists.
+        targets: if given, only these session names are created (in the given
+            order). Names not present in ``spec`` raise ``ValueError``. If
+            ``None``, every session in ``spec`` is created in declaration order.
+
+    If a window marked ``active`` belongs to one of the created sessions, the
+    current tmux client is moved to it after building. Returns the created
+    session ids.
     """
     parsed = _parse_windows(spec)
+
+    selected = _select_sessions(parsed, targets)
+
     session_ids = []
     active_window_id: Optional[str] = None
-    for session_name, windows in parsed.items():
-        session_id, active = create_session(session_name, windows, replace=replace)
+    for session_name in selected:
+        session_id, active = create_session(
+            session_name, parsed[session_name], replace=replace)
         session_ids.append(session_id)
         if active is not None:
             active_window_id = active

@@ -108,12 +108,14 @@ def cmd_nvim_exec(tree: TmuxTree, args: argparse.Namespace) -> None:
 def cmd_layout(args: argparse.Namespace) -> None:
     """Create tmux sessions from a JSON layout file, or just print it."""
     spec = load_layout_file(args.file)
-    print_layout(spec)
+    targets = args.sessions or None
+    print_layout(spec, targets=targets)
     if args.print_only:
         return
-    session_ids = create_from_layout(spec, replace=args.replace)
+    session_ids = create_from_layout(spec, replace=args.replace, targets=targets)
+    created_names = targets if targets else list(spec.keys())
     print()
-    for name, session_id in zip(spec.keys(), session_ids):
+    for name, session_id in zip(created_names, session_ids):
         print(f"created session {name} ({session_id})")
 
 
@@ -160,6 +162,13 @@ def main() -> None:
                                dest='print_only',
                                action='store_true',
                                help='Print the layout tree from the file without creating anything')
+    layout_parser.add_argument('-s',
+                               '--session',
+                               dest='sessions',
+                               action='append',
+                               metavar='NAME',
+                               help='Only create this session from the file '
+                                    '(repeatable; default: all sessions)')
 
     args = parser.parse_args()
 
