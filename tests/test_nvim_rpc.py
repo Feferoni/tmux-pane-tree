@@ -8,45 +8,48 @@ import pytest
 import rpc.nvim_rpc as nvim_rpc
 
 
-def _capture_expr(monkeypatch, cmd, returncode=0):
+def _capture_keys(monkeypatch, cmd, returncode=0):
     captured = {}
 
     def fake_run(argv, **kwargs):
-        captured["expr"] = argv[argv.index("--remote-expr") + 1]
+        captured["keys"] = argv[argv.index("--remote-send") + 1]
+        captured["argv"] = argv
         return types.SimpleNamespace(returncode=returncode, stdout="", stderr="")
 
     monkeypatch.setattr(nvim_rpc.subprocess, "run", fake_run)
     ok = nvim_rpc.nvim_exec("/tmp/sock", cmd)
-    return ok, captured["expr"]
+    return ok, captured
 
 
-def test_plain_command_wrapped_in_execute(monkeypatch):
-    ok, expr = _capture_expr(monkeypatch, "w")
+def test_command_sent_in_commandline_mode(monkeypatch):
+    ok, cap = _capture_keys(monkeypatch, "w")
     assert ok is True
-    assert expr == 'execute("w")'
+    # normal-mode guard, clean command line, command, execute
+    assert cap["keys"] == r'<C-\><C-N>:<C-u>w<CR>'
+    assert cap["argv"][:3] == ["nvim", "--server", "/tmp/sock"]
 
 
-def test_quotes_are_escaped(monkeypatch):
-    _, expr = _capture_expr(monkeypatch, 'echo "hi"')
-    assert expr == 'execute("echo \\"hi\\"")'
+def test_uses_remote_send_not_remote_expr(monkeypatch):
+    _, cap = _capture_keys(monkeypatch, "w")
+    assert "--remote-send" in cap["argv"]
+    assert "--remote-expr" not in cap["argv"]
 
 
-def test_injection_attempt_stays_inside_string(monkeypatch):
-    payload = 'x") | call system("evil")|echo("'
-    _, expr = _capture_expr(monkeypatch, payload)
-    assert expr.startswith('execute("') and expr.endswith('")')
-    inner = expr[len('execute("'):-2]
-    # No unescaped double quote survives inside the literal.
-    assert '"' not in inner.replace('\\"', "")
+def test_angle_bracket_escaped_to_lt(monkeypatch):
+    # A literal '<' must become '<lt>' so it is not parsed as a key code.
+    _, cap = _capture_keys(monkeypatch, "echo a < b")
+    assert "<lt>" in cap["keys"]
+    assert cap["keys"] == r'<C-\><C-N>:<C-u>echo a <lt> b<CR>'
 
 
-def test_backslash_escaped_before_quote(monkeypatch):
-    _, expr = _capture_expr(monkeypatch, 'a\\b')
-    assert expr == 'execute("a\\\\b")'
+def test_quotes_pass_through_literally(monkeypatch):
+    # No vimscript string context anymore, so quotes need no escaping.
+    _, cap = _capture_keys(monkeypatch, 'echo "hi"')
+    assert cap["keys"] == r'<C-\><C-N>:<C-u>echo "hi"<CR>'
 
 
 def test_nonzero_returncode_is_false(monkeypatch):
-    ok, _ = _capture_expr(monkeypatch, "w", returncode=1)
+    ok, _ = _capture_keys(monkeypatch, "w", returncode=1)
     assert ok is False
 
 

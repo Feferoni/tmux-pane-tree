@@ -39,17 +39,25 @@ def find_nvim_socket(pane_pid: int) -> Optional[str]:
 
 
 def nvim_exec(socket: str, cmd: str) -> bool:
-    """Execute command in neovim via socket.
+    """Run an Ex command in a remote neovim via its socket.
 
-    ``cmd`` is embedded in a vimscript double-quoted string passed to
-    ``execute()``. Backslashes and double quotes are escaped so the command
-    cannot break out of the string literal (expr injection).
+    The command is delivered with ``--remote-send`` in command-line mode rather
+    than assembled into a vimscript string. The key sequence is:
+
+    * ``<C-\\><C-N>`` — force normal mode (works from insert/visual/etc.),
+    * ``:`` then ``<C-u>`` — open a clean command line,
+    * the command text,
+    * ``<CR>`` — execute it.
+
+    Only ``<`` needs escaping (to ``<lt>``) so literal text in ``cmd`` is not
+    parsed as tmux/neovim key-code notation. Returns True on success.
     """
-    # Order matters: escape backslashes before quotes.
-    escaped = cmd.replace('\\', '\\\\').replace('"', '\\"')
+    # Protect key-code notation: a literal '<' must not start a "<...>" key name.
+    safe_cmd = cmd.replace('<', '<lt>')
+    keys = f'<C-\\><C-N>:<C-u>{safe_cmd}<CR>'
     try:
         result = subprocess.run(
-            ['nvim', '--server', socket, '--remote-expr', f'execute("{escaped}")'],
+            ['nvim', '--server', socket, '--remote-send', keys],
             capture_output=True, timeout=2, text=True
         )
         return result.returncode == 0
