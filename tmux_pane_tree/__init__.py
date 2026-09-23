@@ -1,3 +1,3 @@
-from .tmux_tree import TmuxTree
+from .tmux_tree import TmuxTree, TmuxError
 
-__all__ = ['TmuxTree']
+__all__ = ['TmuxTree', 'TmuxError']

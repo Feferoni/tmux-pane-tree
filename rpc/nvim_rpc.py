@@ -39,12 +39,21 @@ def find_nvim_socket(pane_pid: int) -> Optional[str]:
 
 
 def nvim_exec(socket: str, cmd: str) -> bool:
-    """Execute command in neovim via socket."""
+    """Execute command in neovim via socket.
+
+    ``cmd`` is embedded in a vimscript double-quoted string passed to
+    ``execute()``. Backslashes and double quotes are escaped so the command
+    cannot break out of the string literal (expr injection).
+    """
+    # Order matters: escape backslashes before quotes.
+    escaped = cmd.replace('\\', '\\\\').replace('"', '\\"')
     try:
         result = subprocess.run(
-            ['nvim', '--server', socket, '--remote-expr', f'execute("{cmd}")'],
+            ['nvim', '--server', socket, '--remote-expr', f'execute("{escaped}")'],
             capture_output=True, timeout=2, text=True
         )
         return result.returncode == 0
-    except:
+    except (OSError, subprocess.SubprocessError):
+        # nvim missing/unreachable, or timeout expired. Treat as failure to
+        # execute; let KeyboardInterrupt/SystemExit propagate.
         return False

@@ -2,7 +2,7 @@
 
 import sys
 import argparse
-from tmux_pane_tree import TmuxTree
+from tmux_pane_tree import TmuxTree, TmuxError
 from rpc import find_nvim_socket, nvim_exec
 
 
@@ -139,8 +139,12 @@ def main() -> None:
         'nvim_exec': cmd_nvim_exec,
     }
 
-    tree = TmuxTree()
-    commands[args.command](tree, args)
+    try:
+        tree = TmuxTree()
+        commands[args.command](tree, args)
+    except TmuxError as exc:
+        print(f"tmux error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

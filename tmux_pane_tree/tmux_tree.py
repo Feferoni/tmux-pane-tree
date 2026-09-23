@@ -1,11 +1,29 @@
+import shlex
 import subprocess
-import json
-from typing import Optional, Dict
+from typing import List, Optional, Dict
 
 
-def run_tmux(cmd: str) -> str:
-    """Execute tmux command and return output."""
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, executable='/bin/bash')
+class TmuxError(RuntimeError):
+    """Raised when a tmux command fails or tmux is not available."""
+
+
+def run_tmux(args: List[str]) -> str:
+    """Execute a tmux command and return its stdout.
+
+    ``args`` is the argument vector *after* ``tmux`` (e.g. ``["list-panes", "-t", pane_id]``).
+    Commands run without a shell, so arguments are passed literally and are not
+    subject to shell interpolation or injection.
+
+    Raises:
+        TmuxError: if the ``tmux`` binary is missing or the command exits non-zero.
+    """
+    try:
+        result = subprocess.run(["tmux", *args], capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise TmuxError("tmux executable not found on PATH") from exc
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"exit status {result.returncode}"
+        raise TmuxError(f"tmux {' '.join(args)}: {detail}")
     return result.stdout.strip()
 
 
@@ -25,26 +43,31 @@ class Pane:
 
     def get_process(self) -> str:
         """Get the process running in this pane."""
-        cmd = f"tmux display-message -p -t '{self.id}' '#{{pane_current_command}}'"
-        return run_tmux(cmd)
+        return run_tmux(
+            ["display-message", "-p", "-t", self.id, "#{pane_current_command}"])
 
     def has_subprocess(self, process_name: str) -> bool:
         """Check if a specific subprocess is running in this pane."""
         return process_name.lower() in self.get_process().lower()
 
     def send_keys(self, keys: str) -> None:
-        """Send keys to this pane. Separate literal text and special keys with spaces."""
-        # Build the tmux command - keys should already be properly formatted by caller
-        run_tmux(f"tmux send-keys -t '{self.id}' {keys}")
+        """Send keys to this pane.
+
+        ``keys`` is split with shell-style tokenization so callers can mix literal
+        text and tmux key names (e.g. ``'"echo hi" Enter'``). Tokens are passed to
+        tmux as separate argv items without invoking a shell.
+        """
+        run_tmux(["send-keys", "-t", self.id, *shlex.split(keys)])
 
     def switch_to(self) -> None:
         """Switch to this pane."""
-        run_tmux(f"tmux select-pane -t '{self.id}'")
+        run_tmux(["select-pane", "-t", self.id])
 
     def is_zoomed(self) -> bool:
         """Check if this pane's window is currently zoomed."""
         return run_tmux(
-            f"tmux display-message -p -t '{self.window.id}' '#{{window_zoomed_flag}}'") == '1'
+            ["display-message", "-p", "-t", self.window.id,
+             "#{window_zoomed_flag}"]) == '1'
 
     def get_neighbors(self) -> Dict[str, str]:
         """Get neighboring panes (left, right, up, down). Falls back to pane IDs as keys."""
@@ -90,14 +113,21 @@ class Window:
 
     def load_panes(self) -> None:
         """Load all panes in this window."""
-        cmd = f"tmux list-panes -t '{self.id}' -F '#{{pane_id}}|#{{pane_index}}|#{{pane_active}}|#{{pane_width}}|#{{pane_height}}|#{{pane_left}}|#{{pane_top}}|#{{pane_pid}}'"
+        cmd = ["list-panes", "-t", self.id, "-F",
+               "#{pane_id}|#{pane_index}|#{pane_active}|#{pane_width}|"
+               "#{pane_height}|#{pane_left}|#{pane_top}|#{pane_pid}"]
         output = run_tmux(cmd)
         for line in output.split('\n'):
-            if line:
-                parts = line.split('|')
-                pane = Pane(parts[0], self, parts[1], parts[2] == '1', parts[3], parts[4], parts[5],
-                            parts[6], parts[7])
-                self.panes.append(pane)
+            if not line:
+                continue
+            parts = line.split('|')
+            if len(parts) != 8:
+                # Skip malformed lines rather than raising IndexError. Pane
+                # fields are IDs/ints/flags and never contain '|'.
+                continue
+            pane = Pane(parts[0], self, parts[1], parts[2] == '1', parts[3], parts[4], parts[5],
+                        parts[6], parts[7])
+            self.panes.append(pane)
 
 
 class Session:
@@ -110,14 +140,20 @@ class Session:
 
     def load_windows(self) -> None:
         """Load all windows in this session."""
-        cmd = f"tmux list-windows -t '{self.id}' -F '#{{window_id}}|#{{window_index}}|#{{window_name}}|#{{window_active}}'"
+        # window_name is placed last so a '|' in the name cannot corrupt other
+        # fields; split with maxsplit lets the name absorb any '|' it contains.
+        cmd = ["list-windows", "-t", self.id, "-F",
+               "#{window_id}|#{window_index}|#{window_active}|#{window_name}"]
         output = run_tmux(cmd)
         for line in output.split('\n'):
-            if line:
-                parts = line.split('|')
-                window = Window(parts[0], self, parts[1], parts[2], parts[3] == '1')
-                window.load_panes()
-                self.windows.append(window)
+            if not line:
+                continue
+            parts = line.split('|', 3)
+            if len(parts) != 4:
+                continue
+            window = Window(parts[0], self, parts[1], parts[3], parts[2] == '1')
+            window.load_panes()
+            self.windows.append(window)
 
 
 class TmuxTree:
@@ -128,14 +164,19 @@ class TmuxTree:
 
     def load(self) -> None:
         """Load all tmux sessions, windows, and panes."""
-        cmd = "tmux list-sessions -F '#{session_id}|#{session_name}|#{session_attached}'"
+        # session_name placed last so a '|' in the name cannot corrupt other fields.
+        cmd = ["list-sessions", "-F",
+               "#{session_id}|#{session_attached}|#{session_name}"]
         output = run_tmux(cmd)
         for line in output.split('\n'):
-            if line:
-                parts = line.split('|')
-                session = Session(parts[0], parts[1], parts[2] != '0')
-                session.load_windows()
-                self.sessions.append(session)
+            if not line:
+                continue
+            parts = line.split('|', 2)
+            if len(parts) != 3:
+                continue
+            session = Session(parts[0], parts[2], parts[1] != '0')
+            session.load_windows()
+            self.sessions.append(session)
 
     def get_current_pane(self) -> Optional[Pane]:
         """Get the currently active pane."""
