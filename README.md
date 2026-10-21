@@ -23,6 +23,15 @@ tree = TmuxTree()
 # Print tree
 tree.print_tree()
 
+# Print tree with subprocess PIDs and command lines
+tree.print_tree(show_pids=True)
+
+# Print only the current session
+tree.print_tree(current_only=True)
+
+# Subprocesses of a single pane: [(pid, command line), ...]
+current.get_subprocesses()
+
 # Get current pane
 current = tree.get_current_pane()
 
@@ -47,6 +56,12 @@ other_pane.send_keys('echo hello')
 
 # Show tree
 ./tmux-pane-tree tree
+
+# Show tree with "pid | command" rows for subprocesses in each pane
+./tmux-pane-tree tree --pids
+
+# Show only the current session's tree
+./tmux-pane-tree tree --current
 
 # Show current pane info
 ./tmux-pane-tree current

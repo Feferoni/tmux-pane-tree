@@ -134,3 +134,138 @@ def test_direction_none_when_not_adjacent():
     a = _geo_pane(0, 0)
     far = _geo_pane(500, 500)
     assert a.get_direction_to(far) is None
+
+
+# --- get_subprocesses: process-tree walk ----------------------------------
+
+def _patch_ps(monkeypatch, rows):
+    """Patch subprocess.run used by get_subprocesses to return (pid, ppid, args) rows."""
+    stdout = "".join(f"{pid} {ppid} {args}\n" for pid, ppid, args in rows)
+
+    def fake_run(argv, **kwargs):
+        assert argv[0] == "ps"
+        return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(tt.subprocess, "run", fake_run)
+
+
+def test_subprocesses_returns_descendants_breadth_first(monkeypatch):
+    pane = _make_pane()  # pane.pid == 123
+    # 123 -> 200, 201 ; 200 -> 300 ; unrelated tree 999 -> 998
+    _patch_ps(monkeypatch, [(200, 123, "nvim ."), (201, 123, "clangd --log=info"),
+                            (300, 200, "node server.js"), (999, 1, "init"),
+                            (998, 999, "other")])
+    assert pane.get_subprocesses() == [(200, "nvim ."), (201, "clangd --log=info"),
+                                       (300, "node server.js")]
+
+
+def test_subprocesses_empty_when_no_children(monkeypatch):
+    pane = _make_pane()  # pane.pid == 123
+    _patch_ps(monkeypatch, [(1, 0, "init"), (999, 1, "x")])
+    assert pane.get_subprocesses() == []
+
+
+def test_subprocesses_empty_when_ps_missing(monkeypatch):
+    pane = _make_pane()
+
+    def fake_run(argv, **kwargs):
+        raise FileNotFoundError()
+
+    monkeypatch.setattr(tt.subprocess, "run", fake_run)
+    assert pane.get_subprocesses() == []
+
+
+def test_subprocesses_skips_malformed_lines(monkeypatch):
+    pane = _make_pane()  # pane.pid == 123
+
+    def fake_run(argv, **kwargs):
+        return types.SimpleNamespace(
+            returncode=0, stdout="200 123 vim\ngarbage\n  \nabc def ghi\n201 123\n", stderr="")
+
+    monkeypatch.setattr(tt.subprocess, "run", fake_run)
+    assert pane.get_subprocesses() == [(200, "vim"), (201, "")]
+
+
+# --- print_tree: --pids table ----------------------------------------------
+
+def _tree_with_two_panes(fake):
+    fake.on("list-sessions", lambda a: "$1|1|trrc")
+    fake.on("list-windows", lambda a: "@2|1|1|trrc")
+    fake.on("list-panes", lambda a: "%3|1|1|215|74|0|0|100\n%4|2|0|213|37|216|0|500")
+    fake.on("display-message", lambda a: "nvim" if a[3] == "%3" else "bash")
+    return tt.TmuxTree()
+
+
+def test_print_tree_without_pids_prints_no_table(fake_tmux, monkeypatch, capsys):
+    tree = _tree_with_two_panes(fake_tmux)
+
+    def boom(*a, **k):
+        raise AssertionError("ps must not run without show_pids")
+
+    monkeypatch.setattr(tt.subprocess, "run", boom)
+    tree.print_tree()
+    assert " | " not in capsys.readouterr().out
+
+
+def test_print_tree_with_pids_prints_table_only_for_busy_panes(fake_tmux, monkeypatch, capsys):
+    tree = _tree_with_two_panes(fake_tmux)
+    _patch_ps(monkeypatch, [(123123, 100, "nvim ."), (77, 100, "clangd")])
+    tree.print_tree(show_pids=True)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "● Session: trrc ($1)",
+        "  ● Window 1: trrc (@2)",
+        "    ● Pane 1 (%3) - nvim [215x74 @ 0,0]",
+        "      123123 | nvim .",
+        "      77     | clangd",
+        "    ○ Pane 2 (%4) - bash [213x37 @ 216,0]",
+    ]
+
+
+# --- print_tree: --current -------------------------------------------------
+
+def _two_session_tree(fake):
+    fake.on("list-sessions", lambda a: "$1|1|alpha\n$2|1|beta")
+    fake.on("list-windows", lambda a: "@1|0|1|w" if a[2] == "$1" else "@2|0|1|w")
+    fake.on("list-panes", lambda a: "%1|0|1|80|24|0|0|1" if a[2] == "@1"
+            else "%2|0|1|80|24|0|0|2")
+    fake.on("display-message", lambda a: "bash")
+    return tt.TmuxTree()
+
+
+def test_print_tree_current_uses_tmux_pane_session(fake_tmux, monkeypatch, capsys):
+    tree = _two_session_tree(fake_tmux)
+    monkeypatch.setenv("TMUX_PANE", "%2")
+    tree.print_tree(current_only=True)
+    out = capsys.readouterr().out
+    assert "beta" in out and "alpha" not in out
+
+
+def test_print_tree_current_falls_back_to_attached(fake_tmux, monkeypatch, capsys):
+    fake_tmux.on("list-sessions", lambda a: "$1|0|alpha\n$2|1|beta")
+    fake_tmux.on("list-windows", lambda a: "@1|0|1|w")
+    fake_tmux.on("list-panes", lambda a: "%1|0|1|80|24|0|0|1")
+    fake_tmux.on("display-message", lambda a: "bash")
+    tree = tt.TmuxTree()
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    tree.print_tree(current_only=True)
+    out = capsys.readouterr().out
+    assert "beta" in out and "alpha" not in out
+
+
+def test_print_tree_current_raises_without_session(fake_tmux, monkeypatch):
+    fake_tmux.on("list-sessions", lambda a: "$1|0|alpha")
+    fake_tmux.on("list-windows", lambda a: "@1|0|1|w")
+    fake_tmux.on("list-panes", lambda a: "%1|0|1|80|24|0|0|1")
+    tree = tt.TmuxTree()
+    monkeypatch.delenv("TMUX_PANE", raising=False)
+    with pytest.raises(TmuxError, match="no current session"):
+        tree.print_tree(current_only=True)
+
+
+def test_print_tree_all_sessions_by_default(fake_tmux, monkeypatch, capsys):
+    tree = _two_session_tree(fake_tmux)
+    monkeypatch.setenv("TMUX_PANE", "%2")
+    tree.print_tree()
+    out = capsys.readouterr().out
+    assert "alpha" in out and "beta" in out

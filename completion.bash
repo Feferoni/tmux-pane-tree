@@ -18,6 +18,11 @@ _tmux_pane_tree() {
     local cmd="${COMP_WORDS[1]}"
     
     case "${cmd}" in
+        tree)
+            if [[ ${cur} == -* ]]; then
+                COMPREPLY=( $(compgen -W "-p --pids -c --current" -- ${cur}) )
+            fi
+            ;;
         find)
             # Complete common process names
             if [[ ${COMP_CWORD} -eq 2 ]]; then

@@ -10,8 +10,8 @@ from rpc import find_nvim_socket, nvim_exec
 DEFAULT_LAYOUT_FILE = os.path.expanduser('~/.tmux_pane_tree_layout.json')
 
 
-def cmd_tree(tree: TmuxTree, _: argparse.Namespace) -> None:
-    tree.print_tree()
+def cmd_tree(tree: TmuxTree, args: argparse.Namespace) -> None:
+    tree.print_tree(show_pids=args.pids, current_only=args.current)
 
 
 def cmd_current(tree: TmuxTree, _: argparse.Namespace) -> None:
@@ -123,7 +123,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Tmux pane tree manager')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
-    subparsers.add_parser('tree', help='Print tree of sessions/windows/panes')
+    tree_parser = subparsers.add_parser('tree', help='Print tree of sessions/windows/panes')
+    tree_parser.add_argument('-p',
+                             '--pids',
+                             action='store_true',
+                             help='Show the PID and command of subprocesses running in each pane')
+    tree_parser.add_argument('-c',
+                             '--current',
+                             action='store_true',
+                             help='Only print the current session')
     subparsers.add_parser('current', help='Show current pane info')
     subparsers.add_parser('neighbors', help='List neighbor panes')
 

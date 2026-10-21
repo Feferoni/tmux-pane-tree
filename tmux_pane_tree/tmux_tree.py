@@ -1,6 +1,7 @@
+import os
 import shlex
 import subprocess
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 
 
 class TmuxError(RuntimeError):
@@ -45,6 +46,47 @@ class Pane:
         """Get the process running in this pane."""
         return run_tmux(
             ["display-message", "-p", "-t", self.id, "#{pane_current_command}"])
+
+    def get_subprocesses(self) -> List[Tuple[int, str]]:
+        """Return ``(pid, command line)`` for every process descended from this pane's shell.
+
+        tmux exposes only the pane's own PID (``self.pid``); the processes
+        running *inside* the pane are its OS children. This walks the system
+        process table (``ps -eo pid=,ppid=,args=``) and returns every process in
+        the subtree rooted at ``self.pid``, excluding the pane PID itself.
+
+        Results are in a stable, breadth-first order (direct children before
+        grandchildren). An empty list means the pane is sitting at an idle
+        shell with no running subprocesses.
+        """
+        children: Dict[int, List[int]] = {}
+        commands: Dict[int, str] = {}
+        try:
+            output = subprocess.run(
+                ["ps", "-eo", "pid=,ppid=,args="], capture_output=True, text=True)
+        except FileNotFoundError:
+            return []
+        if output.returncode != 0:
+            return []
+
+        for line in output.stdout.splitlines():
+            fields = line.split(None, 2)
+            if len(fields) < 2:
+                continue
+            try:
+                pid, ppid = int(fields[0]), int(fields[1])
+            except ValueError:
+                continue
+            children.setdefault(ppid, []).append(pid)
+            commands[pid] = fields[2].strip() if len(fields) == 3 else ""
+
+        descendants: List[Tuple[int, str]] = []
+        queue = list(children.get(self.pid, []))
+        while queue:
+            pid = queue.pop(0)
+            descendants.append((pid, commands[pid]))
+            queue.extend(children.get(pid, []))
+        return descendants
 
     def has_subprocess(self, process_name: str) -> bool:
         """Check if a specific subprocess is running in this pane."""
@@ -212,9 +254,42 @@ class TmuxTree:
                         return pane
         return None
 
-    def print_tree(self) -> None:
-        """Print tree representation of sessions -> windows -> panes."""
+    def get_current_session(self) -> Optional[Session]:
+        """Get the session the caller is running in.
+
+        Inside tmux, ``$TMUX_PANE`` identifies the pane the command was started
+        from, and its session is returned. Outside tmux (or if that pane is
+        unknown) this falls back to the first attached session.
+        """
+        pane_id = os.environ.get("TMUX_PANE")
+        if pane_id:
+            pane = self.find_pane(pane_id)
+            if pane:
+                return pane.window.session
         for session in self.sessions:
+            if session.attached:
+                return session
+        return None
+
+    def print_tree(self, show_pids: bool = False, current_only: bool = False) -> None:
+        """Print tree representation of sessions -> windows -> panes.
+
+        With ``show_pids``, each pane that has running subprocesses also gets
+        ``pid | command`` rows listing them. Panes at an idle shell get none.
+
+        With ``current_only``, only the current session (see
+        ``get_current_session``) is printed.
+
+        Raises:
+            TmuxError: if ``current_only`` is set and no current session exists.
+        """
+        sessions = self.sessions
+        if current_only:
+            current = self.get_current_session()
+            if current is None:
+                raise TmuxError("no current session found")
+            sessions = [current]
+        for session in sessions:
             marker = "●" if session.attached else "○"
             print(f"{marker} Session: {session.name} ({session.id})")
             for window in session.windows:
@@ -226,3 +301,9 @@ class TmuxTree:
                     print(
                         f"    {marker} Pane {pane.index} ({pane.id}) - {process} [{pane.width}x{pane.height} @ {pane.x},{pane.y}]"
                     )
+                    if show_pids:
+                        subprocesses = pane.get_subprocesses()
+                        if subprocesses:
+                            width = max(len(str(pid)) for pid, _ in subprocesses)
+                            for pid, command in subprocesses:
+                                print(f"      {str(pid).ljust(width)} | {command}")
